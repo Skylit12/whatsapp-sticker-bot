@@ -20,19 +20,16 @@ async function startBot() {
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     if (!msg?.message || msg.key.fromMe) return;
-
     const sender = msg.key.remoteJid;
     const msgType = msg.message;
 
-    const clearFiles = () => {
-      ["jpg", "png", "webp", "mp4"].forEach(ext => {
-        ["media_input", "media_output"].forEach(file => {
-          const path = `${file}.${ext}`;
-          if (fs.existsSync(path)) fs.unlinkSync(path);
-        });
+    // Cleanup old files
+    ["jpg", "png", "webp", "mp4"].forEach(ext => {
+      ["media_input", "media_output"].forEach(file => {
+        const path = `${file}.${ext}`;
+        if (fs.existsSync(path)) fs.unlinkSync(path);
       });
-    };
-    clearFiles();
+    });
 
     // IMAGE → STICKER
     if (msgType.imageMessage) {
@@ -81,7 +78,7 @@ async function startBot() {
       exec(cmd, async (err) => {
         if (err) return console.error("❌ Sticker → Video error:", err);
         const video = fs.readFileSync("media_output.mp4");
-        await sock.sendMessage(sender, { video, mimetype: "video/mp4", caption: "" });
+        await sock.sendMessage(sender, { video });
         console.log("✅ Sticker → Video sent");
       });
     }
@@ -96,7 +93,6 @@ async function startBot() {
 
 startBot();
 
-// 🌐 Keep service running (Render or local)
 const app = express();
 app.get("/", (_, res) => res.send("✅ WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
