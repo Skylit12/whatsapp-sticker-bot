@@ -20,7 +20,7 @@ async function startBot() {
       const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
       fs.writeFileSync("image.jpg", buffer);
 
-      exec(ffmpeg -i image.jpg -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 output.webp, async (err) => {
+      exec(`ffmpeg -i image.jpg -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 output.webp`, async (err) => {
         if (!err) {
           const stickerBuffer = fs.readFileSync("output.webp");
           await sock.sendMessage(sender, { sticker: stickerBuffer });
