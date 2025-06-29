@@ -16,7 +16,7 @@ async function startBot() {
       console.log("✅ Connected to WhatsApp");
     } else if (connection === "close") {
       console.log("❌ Disconnected. Reconnecting...");
-      startBot(); // Reconnect
+      startBot(); // Reconnect on failure
     }
   });
 
@@ -27,21 +27,19 @@ async function startBot() {
     if (!msg.message || msg.key.fromMe) return;
 
     const sender = msg.key.remoteJid;
-    const imageMessage = msg.message.imageMessage;
 
+    // ✅ IMAGE to STICKER
+    const imageMessage = msg.message.imageMessage;
     if (imageMessage) {
       console.log("🖼 Image received from:", sender);
-
       const imgPath = "image.jpg";
       const outPath = "output.webp";
-
       if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
       if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 
       const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
       fs.writeFileSync(imgPath, buffer);
 
-      // FFmpeg command with true transparent padding
       const ffmpegCmd = `ffmpeg -y -i ${imgPath} -vf "scale=iw*min(512/iw\\,512/ih):ih*min(512/iw\\,512/ih),pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 -pix_fmt yuva420p ${outPath}`;
 
       exec(ffmpegCmd, async (err, stdout, stderr) => {
@@ -51,13 +49,40 @@ async function startBot() {
           return;
         }
 
-        console.log("🛠️ FFmpeg finished");
+        console.log("🛠️ Image converted to sticker");
         const stickerBuffer = fs.readFileSync(outPath);
         await sock.sendMessage(sender, { sticker: stickerBuffer });
         console.log("✅ Sticker sent to", sender);
       });
-    } else {
-      console.log("⚠️ Not an image. Ignoring.");
+      return;
+    }
+
+    // ✅ STICKER to IMAGE
+    const stickerMessage = msg.message.stickerMessage;
+    if (stickerMessage) {
+      console.log("🧷 Sticker received from:", sender);
+      const stickerPath = "sticker.webp";
+      const outputImg = "converted.jpg";
+      if (fs.existsSync(stickerPath)) fs.unlinkSync(stickerPath);
+      if (fs.existsSync(outputImg)) fs.unlinkSync(outputImg);
+
+      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
+      fs.writeFileSync(stickerPath, buffer);
+
+      const ffmpegCmd = `ffmpeg -y -i ${stickerPath} ${outputImg}`;
+
+      exec(ffmpegCmd, async (err, stdout, stderr) => {
+        if (err) {
+          console.error("❌ FFmpeg error (sticker):", err);
+          console.error("🔧 FFmpeg stderr:", stderr);
+          return;
+        }
+
+        console.log("🛠️ Sticker converted to image");
+        const imageBuffer = fs.readFileSync(outputImg);
+        await sock.sendMessage(sender, { image: imageBuffer, caption: "Here is your sticker as image 📷" });
+        console.log("✅ Image sent to", sender);
+      });
     }
   });
 
@@ -66,7 +91,7 @@ async function startBot() {
 
 startBot();
 
-// Express server to keep service alive
+// Keep alive server for Render
 const app = express();
 app.get("/", (req, res) => res.send("✅ WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
