@@ -5,11 +5,26 @@ const express = require("express");
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info");
+
   const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: true,
+    auth: state
   });
 
+  // Listen for QR code and connection updates
+  sock.ev.on("connection.update", (update) => {
+    const { connection, qr } = update;
+    if (qr) {
+      console.log("📱 Scan this QR code:\n", qr);
+    }
+    if (connection === "open") {
+      console.log("✅ Connected to WhatsApp");
+    } else if (connection === "close") {
+      console.log("❌ Disconnected. Retrying...");
+      startBot(); // Reconnect
+    }
+  });
+
+  // Handle incoming image messages
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     if (!msg.message || msg.key.fromMe) return;
@@ -38,9 +53,9 @@ async function startBot() {
 
 startBot();
 
-// For Render to keep the service alive
+// Keep the app alive on Render
 const app = express();
 app.get("/", (req, res) => res.send("WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
-  console.log("Server is running on port", process.env.PORT || 3000);
+  console.log("🌐 Server is running on port", process.env.PORT || 3000);
 });
