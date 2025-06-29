@@ -35,18 +35,28 @@ async function startBot() {
     if (imageMessage) {
       console.log("🖼 Image received from:", sender);
 
-      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
-      fs.writeFileSync("image.jpg", buffer);
+      const imgPath = "image.jpg";
+      const outPath = "output.webp";
 
+      // Clean up previous files if exist
+      if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
+      if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
+
+      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
+      fs.writeFileSync(imgPath, buffer);
+
+      // Run FFmpeg with overwrite enabled and logging
       exec(
-        `ffmpeg -i image.jpg -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 output.webp`,
-        async (err) => {
+        `ffmpeg -y -i ${imgPath} -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 ${outPath}`,
+        async (err, stdout, stderr) => {
           if (err) {
             console.error("❌ FFmpeg error:", err);
+            console.error("🔧 FFmpeg stderr:", stderr);
             return;
           }
 
-          const stickerBuffer = fs.readFileSync("output.webp");
+          console.log("🛠️ FFmpeg finished");
+          const stickerBuffer = fs.readFileSync(outPath);
           await sock.sendMessage(sender, { sticker: stickerBuffer });
           console.log("✅ Sticker sent to", sender);
         }
@@ -61,7 +71,7 @@ async function startBot() {
 
 startBot();
 
-// Express web server (needed for Render)
+// Express web server (for Render to stay live)
 const app = express();
 app.get("/", (req, res) => res.send("✅ WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
