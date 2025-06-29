@@ -10,9 +10,8 @@ async function startBot() {
   sock.ev.on("connection.update", (update) => {
     const { connection, qr } = update;
     if (qr) console.log("📱 Scan this QR code:\n", qr);
-    if (connection === "open") {
-      console.log("✅ Connected to WhatsApp");
-    } else if (connection === "close") {
+    if (connection === "open") console.log("✅ Connected to WhatsApp");
+    else if (connection === "close") {
       console.log("❌ Disconnected. Reconnecting...");
       startBot();
     }
@@ -20,50 +19,75 @@ async function startBot() {
 
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
-    console.log("📩 New message:", msg?.key?.remoteJid || "unknown");
+    if (!msg?.message || msg.key.fromMe) return;
 
-    if (!msg.message || msg.key.fromMe) return;
     const sender = msg.key.remoteJid;
+    const msgType = msg.message;
 
-    const imageMessage = msg.message.imageMessage;
-    const stickerMessage = msg.message.stickerMessage;
-
-    if (imageMessage) {
-      console.log("🖼 Image received from:", sender);
-      const imgPath = "image.jpg";
-      const outPath = "output.webp";
-
-      [imgPath, outPath].forEach(file => fs.existsSync(file) && fs.unlinkSync(file));
-      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
-      fs.writeFileSync(imgPath, buffer);
-
-      const ffmpegCmd = `ffmpeg -y -i ${imgPath} -vf "scale=iw*min(512/iw\\,512/ih):ih*min(512/iw\\,512/ih),pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 -pix_fmt yuva420p ${outPath}`;
-
-      exec(ffmpegCmd, async (err) => {
-        if (err) return console.error("❌ FFmpeg error:", err);
-        const stickerBuffer = fs.readFileSync(outPath);
-        await sock.sendMessage(sender, { sticker: stickerBuffer });
-        console.log("✅ Sticker sent to", sender);
+    const clearFiles = () => {
+      ["jpg", "png", "webp", "mp4"].forEach(ext => {
+        ["media_input", "media_output"].forEach(file => {
+          const path = `${file}.${ext}`;
+          if (fs.existsSync(path)) fs.unlinkSync(path);
+        });
       });
+    };
+    clearFiles();
 
-    } else if (stickerMessage) {
-      console.log("🧷 Sticker received from:", sender);
-      const stickerPath = "sticker.webp";
-      const outputImg = "converted.png";
-
-      [stickerPath, outputImg].forEach(file => fs.existsSync(file) && fs.unlinkSync(file));
+    // IMAGE → STICKER
+    if (msgType.imageMessage) {
       const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
-      fs.writeFileSync(stickerPath, buffer);
-
-      const ffmpegCmd = `ffmpeg -y -i ${stickerPath} -pix_fmt rgba ${outputImg}`;
-      exec(ffmpegCmd, async (err) => {
-        if (err) return console.error("❌ FFmpeg error:", err);
-        const imageBuffer = fs.readFileSync(outputImg);
-        await sock.sendMessage(sender, { image: imageBuffer, mimetype: "image/png", caption: "" });
-        console.log("✅ Image sent to", sender);
+      fs.writeFileSync("media_input.jpg", buffer);
+      const cmd = `ffmpeg -y -i media_input.jpg -vf "scale=iw*min(512/iw\\,512/ih):ih*min(512/iw\\,512/ih),pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 -pix_fmt yuva420p media_output.webp`;
+      exec(cmd, async (err) => {
+        if (err) return console.error("❌ Image → Sticker error:", err);
+        const sticker = fs.readFileSync("media_output.webp");
+        await sock.sendMessage(sender, { sticker });
+        console.log("✅ Image → Sticker sent");
       });
-    } else {
-      console.log("⚠️ Not an image or sticker.");
+    }
+
+    // VIDEO (≤6s) → STICKER
+    else if (msgType.videoMessage) {
+      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
+      fs.writeFileSync("media_input.mp4", buffer);
+      const cmd = `ffmpeg -y -i media_input.mp4 -t 6 -vf "scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0,fps=15" -vcodec libwebp -loop 0 -an -vsync 0 -preset default media_output.webp`;
+      exec(cmd, async (err) => {
+        if (err) return console.error("❌ Video → Sticker error:", err);
+        const sticker = fs.readFileSync("media_output.webp");
+        await sock.sendMessage(sender, { sticker });
+        console.log("✅ Video → Sticker sent");
+      });
+    }
+
+    // STICKER → IMAGE (static)
+    else if (msgType.stickerMessage && !msgType.stickerMessage.isAnimated) {
+      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
+      fs.writeFileSync("media_input.webp", buffer);
+      const cmd = `ffmpeg -y -i media_input.webp -pix_fmt rgba media_output.png`;
+      exec(cmd, async (err) => {
+        if (err) return console.error("❌ Sticker → Image error:", err);
+        const image = fs.readFileSync("media_output.png");
+        await sock.sendMessage(sender, { image, mimetype: "image/png" });
+        console.log("✅ Sticker → Image sent");
+      });
+    }
+
+    // STICKER → VIDEO (animated)
+    else if (msgType.stickerMessage && msgType.stickerMessage.isAnimated) {
+      const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
+      fs.writeFileSync("media_input.webp", buffer);
+      const cmd = `ffmpeg -y -i media_input.webp -movflags faststart -pix_fmt yuv420p -vf "fps=15,scale=512:-1:flags=lanczos" media_output.mp4`;
+      exec(cmd, async (err) => {
+        if (err) return console.error("❌ Sticker → Video error:", err);
+        const video = fs.readFileSync("media_output.mp4");
+        await sock.sendMessage(sender, { video, mimetype: "video/mp4", caption: "" });
+        console.log("✅ Sticker → Video sent");
+      });
+    }
+
+    else {
+      console.log("⚠️ Unsupported message type");
     }
   });
 
@@ -72,7 +96,7 @@ async function startBot() {
 
 startBot();
 
-// 🌐 Render keep-alive
+// 🌐 Keep service running (Render or local)
 const app = express();
 app.get("/", (_, res) => res.send("✅ WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
