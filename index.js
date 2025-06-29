@@ -1,6 +1,7 @@
 const { makeWASocket, useMultiFileAuthState, downloadMediaMessage } = require("@whiskeysockets/baileys");
 const fs = require("fs");
 const { exec } = require("child_process");
+const express = require("express");
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info");
@@ -20,12 +21,15 @@ async function startBot() {
       const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
       fs.writeFileSync("image.jpg", buffer);
 
-      exec(`ffmpeg -i image.jpg -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 output.webp`, async (err) => {
-        if (!err) {
-          const stickerBuffer = fs.readFileSync("output.webp");
-          await sock.sendMessage(sender, { sticker: stickerBuffer });
+      exec(
+        `ffmpeg -i image.jpg -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 output.webp`,
+        async (err) => {
+          if (!err) {
+            const stickerBuffer = fs.readFileSync("output.webp");
+            await sock.sendMessage(sender, { sticker: stickerBuffer });
+          }
         }
-      });
+      );
     }
   });
 
@@ -33,3 +37,10 @@ async function startBot() {
 }
 
 startBot();
+
+// For Render to keep the service alive
+const app = express();
+app.get("/", (req, res) => res.send("WhatsApp Sticker Bot is running"));
+app.listen(process.env.PORT || 3000, () => {
+  console.log("Server is running on port", process.env.PORT || 3000);
+});
