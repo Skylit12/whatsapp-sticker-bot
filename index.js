@@ -38,29 +38,28 @@ async function startBot() {
       const imgPath = "image.jpg";
       const outPath = "output.webp";
 
-      // Clean up previous files if exist
+      // Remove old files
       if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
       if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 
       const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
       fs.writeFileSync(imgPath, buffer);
 
-      // Run FFmpeg with overwrite enabled and logging
-      exec(
-        `ffmpeg -y -i ${imgPath} -vf "scale=512:512:force_original_aspect_ratio=decrease" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 ${outPath}`,
-        async (err, stdout, stderr) => {
-          if (err) {
-            console.error("❌ FFmpeg error:", err);
-            console.error("🔧 FFmpeg stderr:", stderr);
-            return;
-          }
+      // FFmpeg command to maintain aspect ratio with padding
+      const ffmpegCmd = `ffmpeg -y -i ${imgPath} -vf "scale=iw*min(512/iw\\,512/ih):ih*min(512/iw\\,512/ih),pad=512:512:(512-iw*min(512/iw\\,512/ih))/2:(512-ih*min(512/iw\\,512/ih))/2:color=0x00000000" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 ${outPath}`;
 
-          console.log("🛠️ FFmpeg finished");
-          const stickerBuffer = fs.readFileSync(outPath);
-          await sock.sendMessage(sender, { sticker: stickerBuffer });
-          console.log("✅ Sticker sent to", sender);
+      exec(ffmpegCmd, async (err, stdout, stderr) => {
+        if (err) {
+          console.error("❌ FFmpeg error:", err);
+          console.error("🔧 FFmpeg stderr:", stderr);
+          return;
         }
-      );
+
+        console.log("🛠️ FFmpeg finished");
+        const stickerBuffer = fs.readFileSync(outPath);
+        await sock.sendMessage(sender, { sticker: stickerBuffer });
+        console.log("✅ Sticker sent to", sender);
+      });
     } else {
       console.log("⚠️ Not an image. Ignoring.");
     }
@@ -71,7 +70,7 @@ async function startBot() {
 
 startBot();
 
-// Express web server (for Render to stay live)
+// Express server for Render
 const app = express();
 app.get("/", (req, res) => res.send("✅ WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
