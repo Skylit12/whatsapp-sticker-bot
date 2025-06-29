@@ -5,10 +5,8 @@ const express = require("express");
 
 async function startBot() {
   const { state, saveCreds } = await useMultiFileAuthState("auth_info");
-
   const sock = makeWASocket({ auth: state });
 
-  // QR Code and connection handling
   sock.ev.on("connection.update", (update) => {
     const { connection, qr } = update;
     if (qr) {
@@ -18,11 +16,10 @@ async function startBot() {
       console.log("✅ Connected to WhatsApp");
     } else if (connection === "close") {
       console.log("❌ Disconnected. Reconnecting...");
-      startBot(); // Retry on disconnect
+      startBot(); // Reconnect
     }
   });
 
-  // Message handler
   sock.ev.on("messages.upsert", async ({ messages }) => {
     const msg = messages[0];
     console.log("📩 New message:", msg?.key?.remoteJid || "unknown");
@@ -38,15 +35,14 @@ async function startBot() {
       const imgPath = "image.jpg";
       const outPath = "output.webp";
 
-      // Remove old files
       if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
       if (fs.existsSync(outPath)) fs.unlinkSync(outPath);
 
       const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger: console });
       fs.writeFileSync(imgPath, buffer);
 
-      // FFmpeg command to maintain aspect ratio with padding
-      const ffmpegCmd = `ffmpeg -y -i ${imgPath} -vf "scale=iw*min(512/iw\\,512/ih):ih*min(512/iw\\,512/ih),pad=512:512:(512-iw*min(512/iw\\,512/ih))/2:(512-ih*min(512/iw\\,512/ih))/2:color=0x00000000" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 ${outPath}`;
+      // FFmpeg command with true transparent padding
+      const ffmpegCmd = `ffmpeg -y -i ${imgPath} -vf "scale=iw*min(512/iw\\,512/ih):ih*min(512/iw\\,512/ih),pad=512:512:(ow-iw)/2:(oh-ih)/2:color=white@0" -vcodec libwebp -lossless 1 -q:v 50 -preset default -loop 0 -an -vsync 0 -pix_fmt yuva420p ${outPath}`;
 
       exec(ffmpegCmd, async (err, stdout, stderr) => {
         if (err) {
@@ -70,7 +66,7 @@ async function startBot() {
 
 startBot();
 
-// Express server for Render
+// Express server to keep service alive
 const app = express();
 app.get("/", (req, res) => res.send("✅ WhatsApp Sticker Bot is running"));
 app.listen(process.env.PORT || 3000, () => {
